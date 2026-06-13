@@ -596,7 +596,7 @@ export default function WidgetEmbed() {
               </div>
 
               {/* Play/Pause Button */}
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-current/10 text-current scale-[2.5] transform origin-center">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-current scale-[2.5] transform origin-center">
                 {isPlaying ? (
                   <svg
                     width="16"
