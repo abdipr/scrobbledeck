@@ -108,7 +108,7 @@ export default function Customizer() {
   const [customAccentColor, setCustomAccentColor] = useState("#ef4444");
   const [customRadius, setCustomRadius] = useState("lg"); // none | sm | md | lg | xl | full
   const [layout, setLayout] = useState("apple"); // apple | list | grid | compact
-  const [limit, setLimit] = useState(5);
+  const [limit, setLimit] = useState<number | "">(5);
   const [animated, setAnimated] = useState(true);
   const [clickable, setClickable] = useState(true);
   const [showCover, setShowCover] = useState(true);
@@ -166,33 +166,39 @@ export default function Customizer() {
   const buildParams = () => {
     const params = new URLSearchParams();
     params.set("username", username);
-    params.set("type", type);
+    if (type !== "nowplaying") params.set("type", type);
+
     if (type !== "nowplaying") {
-      params.set("period", period);
-      params.set("limit", limit.toString());
+      if (period !== "7day") params.set("period", period);
+      if (limit !== 5 && limit !== "") params.set("limit", limit.toString());
     }
+
     const isCustom =
       theme === "custom" ||
       theme === "spotify" ||
       theme === "cyberpunk" ||
       theme === "synthwave";
-    params.set("theme", isCustom ? "custom" : theme);
+
+    if (theme !== "dark") params.set("theme", isCustom ? "custom" : theme);
+
     if (isCustom) {
-      params.set("bg", customBg);
-      params.set("textColor", customTextColor);
+      if (customBg) params.set("bg", customBg);
+      if (customTextColor) params.set("textColor", customTextColor);
     }
-    params.set("accentColor", customAccentColor);
-    params.set("radius", customRadius);
-    params.set("layout", layout);
-    params.set("animated", animated.toString());
-    params.set("font", customFont);
-    params.set("clickable", clickable.toString());
-    params.set("showCover", showCover.toString());
-    params.set("showLoved", showLoved.toString());
-    params.set("showUsername", showUsername.toString());
-    params.set("scrobbleLabel", scrobbleLabel);
-    params.set("clickTarget", clickTarget);
-    if (layout === "grid") {
+
+    if (customAccentColor) params.set("accentColor", customAccentColor);
+    if (customRadius !== "lg") params.set("radius", customRadius);
+    if (layout !== "list") params.set("layout", layout);
+    if (!animated) params.set("animated", "false");
+    if (customFont !== "Be Vietnam Pro") params.set("font", customFont);
+    if (!clickable) params.set("clickable", "false");
+    if (!showCover) params.set("showCover", "false");
+    if (!showLoved) params.set("showLoved", "false");
+    if (showUsername) params.set("showUsername", "true");
+    if (scrobbleLabel !== "scrobbles") params.set("scrobbleLabel", scrobbleLabel);
+    if (clickTarget !== "lastfm") params.set("clickTarget", clickTarget);
+    
+    if (layout === "grid" && cols !== "") {
       params.set("cols", cols);
     }
     return params.toString();
@@ -325,9 +331,14 @@ export default function Customizer() {
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: "nowplaying", label: "Now Playing" },
+                    { id: "recenttracks", label: "Recent Tracks" },
                     { id: "toptracks", label: "Top Tracks" },
                     { id: "topartists", label: "Top Artists" },
                     { id: "topalbums", label: "Top Albums" },
+                    { id: "lovedtracks", label: "Loved Tracks" },
+                    { id: "userprofile", label: "User Profile" },
+                    { id: "weeklystats", label: "Weekly Stats" },
+                    { id: "topgenres", label: "Top Genres" },
                   ].map((item) => (
                     <Button
                       key={item.id}
@@ -335,6 +346,8 @@ export default function Customizer() {
                         setType(item.id);
                         if (item.id === "nowplaying" && layout === "grid") {
                           setLayout("apple");
+                        } else if (item.id === "userprofile" || item.id === "weeklystats" || item.id === "topgenres") {
+                          setLayout("list");
                         } else if (item.id !== "nowplaying") {
                           if (layout === "compact" || layout === "apple") {
                             setLayout("list");
@@ -351,7 +364,7 @@ export default function Customizer() {
               </div>
 
               {/* If stats, show timeframe & limit options */}
-              {type !== "nowplaying" && (
+              {type !== "nowplaying" && type !== "userprofile" && (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label
@@ -396,14 +409,14 @@ export default function Customizer() {
                       min="1"
                       max="15"
                       value={limit}
-                      onChange={(e) =>
-                        setLimit(
-                          Math.max(
-                            1,
-                            Math.min(15, parseInt(e.target.value) || 5),
-                          ),
-                        )
-                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setLimit("");
+                        } else {
+                          setLimit(Math.max(1, Math.min(15, parseInt(val))));
+                        }
+                      }}
                       className="w-full text-xs font-semibold"
                     />
                   </div>
@@ -427,11 +440,11 @@ export default function Customizer() {
                       label: "Compact",
                       allowed: type === "nowplaying",
                     },
-                    { id: "list", label: "List View", allowed: true },
+                    { id: "list", label: "List View", allowed: type !== "userprofile" && type !== "weeklystats" && type !== "topgenres" },
                     {
                       id: "grid",
                       label: "Grid View",
-                      allowed: type !== "nowplaying",
+                      allowed: type !== "nowplaying" && type !== "userprofile" && type !== "weeklystats" && type !== "topgenres",
                     },
                   ].map(
                     (item) =>

@@ -1,5 +1,4 @@
-const API_KEY =
-  import.meta.env.VITE_LASTFM_API_KEY || "0ba136b606bebb99b634e91fe9f0897f";
+const API_KEY = import.meta.env.VITE_LASTFM_API_KEY || "";
 const BASE_URL = "https://ws.audioscrobbler.com/2.0/";
 
 export interface Track {
@@ -11,6 +10,7 @@ export interface Track {
   loved?: boolean;
   plays?: number;
   date?: string;
+  uts?: number;
   previewUrl?: string;
   appleMusicUrl?: string;
 }
@@ -19,6 +19,28 @@ export interface iTunesInfo {
   image?: string;
   previewUrl?: string;
   appleMusicUrl?: string;
+}
+
+export interface UserProfile {
+  name: string;
+  realname: string;
+  url: string;
+  image: string;
+  country: string;
+  playcount: number;
+  registered: string;
+}
+
+export interface WeeklyStat {
+  name: string;
+  artist: string;
+  playcount: number;
+  image: string;
+}
+
+export interface Tag {
+  name: string;
+  count: number;
 }
 
 export async function fetchiTunesInfo(
@@ -376,7 +398,7 @@ export async function fetchTopAlbums(
 export async function fetchLovedTracks(
   username: string,
   limit = 50,
-): Promise<{ artist: string; name: string }[]> {
+): Promise<Track[]> {
   try {
     const url = `${BASE_URL}?method=user.getlovedtracks&user=${encodeURIComponent(username)}&api_key=${API_KEY}&format=json&limit=${limit}`;
     const res = await fetch(url);
@@ -384,12 +406,181 @@ export async function fetchLovedTracks(
     const data = await res.json();
     const tracks = data?.lovedtracks?.track || [];
     const tracksList = Array.isArray(tracks) ? tracks : [tracks];
-    return tracksList.map((t: any) => ({
-      artist: t.artist?.name || "",
-      name: t.name || "",
-    }));
+    return Promise.all(
+      tracksList.map(async (t: any) => {
+        const artist = t.artist?.name || "";
+        const name = t.name || "";
+        let imgUrl = cleanImage(
+          t.image?.find((img: any) => img.size === "large")?.["#text"] ||
+          t.image?.find((img: any) => img.size === "extralarge")?.["#text"] || ""
+        );
+        if (!imgUrl && artist && name) {
+          imgUrl = await fetchFallbackTrackImage(artist, name);
+        }
+        let previewUrl = "";
+        let appleMusicUrl = "";
+        if (artist && name) {
+          const itunesInfo = await fetchiTunesInfo(artist, name);
+          if (itunesInfo) {
+            previewUrl = itunesInfo.previewUrl || "";
+            appleMusicUrl = itunesInfo.appleMusicUrl || "";
+          }
+        }
+
+        return {
+          name,
+          artist,
+          album: "",
+          image: imgUrl,
+          nowPlaying: false,
+          loved: true,
+          date: t.date?.["#text"] || "",
+          uts: t.date?.uts ? parseInt(t.date.uts, 10) : undefined,
+          previewUrl,
+          appleMusicUrl,
+        };
+      })
+    );
   } catch (e) {
     console.error("fetchLovedTracks error:", e);
+    return [];
+  }
+}
+
+export async function fetchRecentTracksList(
+  username: string,
+  limit = 5,
+): Promise<Track[]> {
+  try {
+    const url = `${BASE_URL}?method=user.getrecenttracks&user=${encodeURIComponent(username)}&api_key=${API_KEY}&format=json&limit=${limit}&extended=1`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch recent tracks");
+    const data = await res.json();
+    const tracks = data?.recenttracks?.track || [];
+    const tracksList = Array.isArray(tracks) ? tracks.slice(0, limit) : [tracks].slice(0, limit);
+    return Promise.all(
+      tracksList.map(async (track: any) => {
+        const artist = track.artist?.name || track.artist?.["#text"] || "";
+        const name = track.name;
+        let imgUrl = cleanImage(
+          track.image?.find((img: any) => img.size === "large")?.["#text"] || ""
+        );
+        if (!imgUrl && artist && name) {
+          imgUrl = await fetchFallbackTrackImage(artist, name);
+        }
+        let previewUrl = "";
+        let appleMusicUrl = "";
+        if (artist && name) {
+          const itunesInfo = await fetchiTunesInfo(artist, name);
+          if (itunesInfo) {
+            previewUrl = itunesInfo.previewUrl || "";
+            appleMusicUrl = itunesInfo.appleMusicUrl || "";
+          }
+        }
+
+        return {
+          name,
+          artist,
+          album: track.album?.["#text"] || "",
+          image: imgUrl,
+          nowPlaying: track["@attr"]?.nowplaying === "true",
+          date: track.date?.["#text"] || "Now Playing",
+          uts: track.date?.uts ? parseInt(track.date.uts, 10) : undefined,
+          previewUrl,
+          appleMusicUrl,
+        };
+      })
+    );
+  } catch (e) {
+    console.error("fetchRecentTracksList error:", e);
+    return [];
+  }
+}
+
+export async function fetchUserInfo(username: string): Promise<UserProfile | null> {
+  try {
+    const url = `${BASE_URL}?method=user.getinfo&user=${encodeURIComponent(username)}&api_key=${API_KEY}&format=json`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const user = data?.user;
+    if (!user) return null;
+    return {
+      name: user.name,
+      realname: user.realname || user.name,
+      url: user.url,
+      image: user.image?.find((img: any) => img.size === "extralarge")?.["#text"] || 
+             user.image?.find((img: any) => img.size === "large")?.["#text"] || "",
+      country: user.country,
+      playcount: parseInt(user.playcount || "0", 10),
+      registered: user.registered?.["#text"] 
+        ? new Date(parseInt(user.registered["#text"]) * 1000).toLocaleDateString()
+        : ""
+    };
+  } catch (e) {
+    console.error("fetchUserInfo error:", e);
+    return null;
+  }
+}
+
+export async function fetchWeeklyTrackChart(username: string, limit = 5): Promise<WeeklyStat[]> {
+  try {
+    const url = `${BASE_URL}?method=user.getweeklytrackchart&user=${encodeURIComponent(username)}&api_key=${API_KEY}&format=json`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const tracks = data?.weeklytrackchart?.track || [];
+    const tracksList = Array.isArray(tracks) ? tracks.slice(0, limit) : [tracks].slice(0, limit);
+    return Promise.all(
+      tracksList.map(async (t: any) => {
+        const artist = t.artist?.["#text"] || t.artist?.name || "";
+        const name = t.name;
+        const imgUrl = await fetchFallbackTrackImage(artist, name);
+        return {
+          name,
+          artist,
+          playcount: parseInt(t.playcount || "0", 10),
+          image: imgUrl
+        };
+      })
+    );
+  } catch (e) {
+    console.error("fetchWeeklyTrackChart error:", e);
+    return [];
+  }
+}
+
+export async function fetchTopTags(username: string, limit = 10): Promise<Tag[]> {
+  try {
+    const topArtists = await fetchTopArtists(username, "1month", 10);
+    const tagCounts: Record<string, number> = {};
+
+    await Promise.all(topArtists.map(async (artist) => {
+      try {
+        const url = `${BASE_URL}?method=artist.gettoptags&artist=${encodeURIComponent(artist.name)}&api_key=${API_KEY}&format=json`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const tags = data?.toptags?.tag || [];
+        const tagsList = Array.isArray(tags) ? tags.slice(0, 5) : [tags].slice(0, 5);
+        
+        tagsList.forEach((t: any) => {
+          if (!t.name || t.name.toLowerCase() === "seen live") return;
+          const tagName = t.name.toLowerCase();
+          // Boost tags of top artists
+          tagCounts[tagName] = (tagCounts[tagName] || 0) + Math.max(1, Math.round(artist.playcount / 10));
+        });
+      } catch (e) {}
+    }));
+
+    const sortedTags = Object.entries(tagCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+      
+    return sortedTags;
+  } catch (e) {
+    console.error("fetchTopTags error:", e);
     return [];
   }
 }
