@@ -10,7 +10,9 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
+import { toPng } from "html-to-image";
 import Footer from "./Footer";
 import Header from "./Header";
 import Cookies from "js-cookie";
@@ -72,9 +74,12 @@ export default function Customizer() {
   const handleColorChange = (rgbaArray: any, setter: (val: string) => void) => {
     if (Array.isArray(rgbaArray)) {
       const [r, g, b, a] = rgbaArray;
-      setter(
-        `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${a})`,
-      );
+      const toHex = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+      let hex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+      if (a < 1) {
+        hex += toHex(a * 255);
+      }
+      setter(hex);
     } else if (typeof rgbaArray === "string") {
       setter(rgbaArray);
     }
@@ -114,14 +119,22 @@ export default function Customizer() {
   const [showCover, setShowCover] = useState(true);
   const [showLoved, setShowLoved] = useState(true);
   const [showUsername, setShowUsername] = useState(false);
+  const [showPlaycount, setShowPlaycount] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [scrobbleLabel, setScrobbleLabel] = useState("scrobbles");
   const [clickTarget, setClickTarget] = useState("lastfm");
   const [cols, setCols] = useState("auto");
   const [customFont, setCustomFont] = useState("Golos Text");
+  const [heightMode, setHeightMode] = useState("auto");
+  const [customIframeHeight, setCustomIframeHeight] = useState("500");
 
   // Copied state
   const [copied, setCopied] = useState(false);
+  const [shareTab, setShareTab] = useState<"iframe" | "markdown" | "url">(
+    "iframe",
+  );
   const [previewKey, setPreviewKey] = useState(0);
+  const [downloading, setDownloading] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeHeight, setIframeHeight] = useState("180px");
@@ -173,18 +186,8 @@ export default function Customizer() {
       if (limit !== 5 && limit !== "") params.set("limit", limit.toString());
     }
 
-    const isCustom =
-      theme === "custom" ||
-      theme === "spotify" ||
-      theme === "cyberpunk" ||
-      theme === "synthwave";
-
-    if (theme !== "dark") params.set("theme", isCustom ? "custom" : theme);
-
-    if (isCustom) {
-      if (customBg) params.set("bg", customBg);
-      if (customTextColor) params.set("textColor", customTextColor);
-    }
+    if (customBg) params.set("bg", customBg);
+    if (customTextColor) params.set("textColor", customTextColor);
 
     if (customAccentColor) params.set("accentColor", customAccentColor);
     if (customRadius !== "lg") params.set("radius", customRadius);
@@ -194,12 +197,20 @@ export default function Customizer() {
     if (!clickable) params.set("clickable", "false");
     if (!showCover) params.set("showCover", "false");
     if (!showLoved) params.set("showLoved", "false");
+    if (!showPlaycount) params.set("showPlaycount", "false");
     if (showUsername) params.set("showUsername", "true");
-    if (scrobbleLabel !== "scrobbles") params.set("scrobbleLabel", scrobbleLabel);
+    if (scrobbleLabel !== "scrobbles")
+      params.set("scrobbleLabel", scrobbleLabel);
     if (clickTarget !== "lastfm") params.set("clickTarget", clickTarget);
-    
-    if (layout === "grid" && cols !== "") {
+
+    if ((layout === "grid" || layout === "immersive-grid") && cols !== "") {
       params.set("cols", cols);
+    }
+    if (layout === "carousel" && autoScroll) {
+      params.set("autoScroll", "true");
+    }
+    if (heightMode === "fixed") {
+      params.set("heightMode", "fixed");
     }
     return params.toString();
   };
@@ -214,17 +225,53 @@ export default function Customizer() {
     return () => clearTimeout(timer);
   }, [widgetUrl]);
 
-  const iframeCode = `<iframe src="${widgetUrl}" width="100%" height="${iframeHeight}" frameborder="0" scrolling="no" style="border-radius: 12px; background: transparent;"></iframe>`;
+  const finalIframeHeight =
+    heightMode === "fixed" ? `${customIframeHeight}px` : iframeHeight;
+  const iframeCode = `<iframe src="${widgetUrl}" width="100%" height="${finalIframeHeight}" frameborder="0" scrolling="no" style="background: transparent;"></iframe>`;
+  const markdownCode = `[My Last.fm Stats Widget](${widgetUrl})`;
+
+  const getShareCode = () => {
+    if (shareTab === "iframe") return iframeCode;
+    if (shareTab === "markdown") return markdownCode;
+    return widgetUrl;
+  };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(iframeCode);
+    navigator.clipboard.writeText(getShareCode());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownloadImage = async () => {
+    if (!iframeRef.current || !iframeRef.current.contentDocument) return;
+    try {
+      setDownloading(true);
+      const rootEl = iframeRef.current.contentDocument.getElementById("root");
+      if (!rootEl) throw new Error("Root element not found inside iframe");
+
+      const dataUrl = await toPng(rootEl, {
+        cacheBust: true,
+        backgroundColor: "transparent",
+        style: {
+          transform: "scale(1)",
+          transformOrigin: "top left",
+        },
+      });
+
+      const link = document.createElement("a");
+      link.download = `scrobbledeck-${username || "widget"}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (e) {
+      console.error("Failed to download image", e);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const applyPreset = (preset: string) => {
     if (preset === "cyberpunk") {
-      setCustomBg("linear-gradient(135deg, #120136 0%, #03001e 100%)");
+      setCustomBg("#0f0f1a");
       setCustomTextColor("#00f0ff");
       setCustomAccentColor("#ff007f");
       setCustomRadius("none");
@@ -236,15 +283,59 @@ export default function Customizer() {
       setCustomRadius("lg");
       setCustomFont("Plus Jakarta Sans");
     } else if (preset === "glass") {
+      setCustomBg("glass");
+      setCustomTextColor("#ffffff");
       setCustomAccentColor("#ef4444");
       setCustomRadius("xl");
       setCustomFont("Golos Text");
     } else if (preset === "synthwave") {
-      setCustomBg("linear-gradient(135deg, #2b0b3f 0%, #0b0214 100%)");
+      setCustomBg("#2b0b3f");
       setCustomTextColor("#f43f5e");
       setCustomAccentColor("#d946ef");
       setCustomRadius("md");
       setCustomFont("Syne");
+    } else if (preset === "dark") {
+      setCustomBg("#09090b");
+      setCustomTextColor("#a1a1aa");
+      setCustomAccentColor("#ef4444");
+      setCustomRadius("lg");
+      setCustomFont("Be Vietnam Pro");
+    } else if (preset === "light") {
+      setCustomBg("#ffffff");
+      setCustomTextColor("#71717a");
+      setCustomAccentColor("#ef4444");
+      setCustomRadius("lg");
+      setCustomFont("Be Vietnam Pro");
+    } else if (preset === "dynamic-dark") {
+      setCustomBg("dynamic-dark");
+      setCustomAccentColor("#ef4444");
+    } else if (preset === "dynamic-light") {
+      setCustomBg("dynamic-light");
+      setCustomAccentColor("#ef4444");
+    } else if (preset === "dracula") {
+      setCustomBg("#282a36");
+      setCustomTextColor("#f8f8f2");
+      setCustomAccentColor("#bd93f9");
+      setCustomRadius("lg");
+      setCustomFont("Fira Code");
+    } else if (preset === "nord") {
+      setCustomBg("#2e3440");
+      setCustomTextColor("#eceff4");
+      setCustomAccentColor("#88c0d0");
+      setCustomRadius("md");
+      setCustomFont("Inter");
+    } else if (preset === "catppuccin") {
+      setCustomBg("#1e1e2e");
+      setCustomTextColor("#cdd6f4");
+      setCustomAccentColor("#cba6f7");
+      setCustomRadius("xl");
+      setCustomFont("Outfit");
+    } else if (preset === "tokyo-night") {
+      setCustomBg("#1a1b26");
+      setCustomTextColor("#a9b1d6");
+      setCustomAccentColor("#7aa2f7");
+      setCustomRadius("lg");
+      setCustomFont("Space Grotesk");
     }
   };
 
@@ -255,6 +346,11 @@ export default function Customizer() {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       try {
+        if (heightMode === "fixed") {
+          setIframeHeight(`${customIframeHeight}px`);
+          return;
+        }
+
         const body = iframe.contentWindow.document.body;
         body.style.overflow = "hidden";
 
@@ -346,7 +442,11 @@ export default function Customizer() {
                         setType(item.id);
                         if (item.id === "nowplaying" && layout === "grid") {
                           setLayout("apple");
-                        } else if (item.id === "userprofile" || item.id === "weeklystats" || item.id === "topgenres") {
+                        } else if (
+                          item.id === "userprofile" ||
+                          item.id === "weeklystats" ||
+                          item.id === "topgenres"
+                        ) {
                           setLayout("list");
                         } else if (item.id !== "nowplaying") {
                           if (layout === "compact" || layout === "apple") {
@@ -407,14 +507,14 @@ export default function Customizer() {
                       id="limit"
                       type="number"
                       min="1"
-                      max="15"
+                      max="30"
                       value={limit}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === "") {
                           setLimit("");
                         } else {
-                          setLimit(Math.max(1, Math.min(15, parseInt(val))));
+                          setLimit(Math.max(1, Math.min(30, parseInt(val))));
                         }
                       }}
                       className="w-full text-xs font-semibold"
@@ -440,11 +540,40 @@ export default function Customizer() {
                       label: "Compact",
                       allowed: type === "nowplaying",
                     },
-                    { id: "list", label: "List View", allowed: type !== "userprofile" && type !== "weeklystats" && type !== "topgenres" },
+                    {
+                      id: "list",
+                      label: "List View",
+                      allowed:
+                        type !== "userprofile" &&
+                        type !== "weeklystats" &&
+                        type !== "topgenres",
+                    },
                     {
                       id: "grid",
                       label: "Grid View",
-                      allowed: type !== "nowplaying" && type !== "userprofile" && type !== "weeklystats" && type !== "topgenres",
+                      allowed:
+                        type !== "nowplaying" &&
+                        type !== "userprofile" &&
+                        type !== "weeklystats" &&
+                        type !== "topgenres",
+                    },
+                    {
+                      id: "immersive-grid",
+                      label: "Immersive Grid",
+                      allowed:
+                        type !== "nowplaying" &&
+                        type !== "userprofile" &&
+                        type !== "weeklystats" &&
+                        type !== "topgenres",
+                    },
+                    {
+                      id: "carousel",
+                      label: "Carousel",
+                      allowed:
+                        type !== "nowplaying" &&
+                        type !== "userprofile" &&
+                        type !== "weeklystats" &&
+                        type !== "topgenres",
                     },
                   ].map(
                     (item) =>
@@ -463,7 +592,7 @@ export default function Customizer() {
               </div>
 
               {/* Grid Columns Options (only shown for grid layout) */}
-              {layout === "grid" && (
+              {(layout === "grid" || layout === "immersive-grid") && (
                 <div className="space-y-1.5 pt-2 border-t border-border/40">
                   <Label
                     htmlFor="gridCols"
@@ -501,6 +630,41 @@ export default function Customizer() {
                   </Select>
                 </div>
               )}
+
+              {/* Height Mode Toggle */}
+              <div className="grid grid-cols-2 gap-4 border-t border-border/40 pt-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Iframe Height Mode
+                  </Label>
+                  <Select value={heightMode} onValueChange={setHeightMode}>
+                    <SelectTrigger className="w-full bg-background border-border text-xs font-semibold">
+                      <SelectValue placeholder="Height Mode" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border-border text-popover-foreground">
+                      <SelectItem value="auto" className="text-xs">
+                        Auto (Fit Content)
+                      </SelectItem>
+                      <SelectItem value="fixed" className="text-xs">
+                        Fixed (Internal Scroll)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {heightMode === "fixed" && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Fixed Height (px)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={customIframeHeight}
+                      onChange={(e) => setCustomIframeHeight(e.target.value)}
+                      className="w-full text-xs font-semibold"
+                    />
+                  </div>
+                )}
+              </div>
 
               {/* Animations Toggle */}
               <div className="flex items-center justify-between border-t border-border/60 pt-4">
@@ -576,6 +740,30 @@ export default function Customizer() {
                   onCheckedChange={(checked) => setShowLoved(!!checked)}
                 />
               </div>
+
+              {/* Show Playcounts Toggle */}
+              <div className="flex items-center justify-between border-t border-border/60 pt-4">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Show Playcounts / Stats
+                </Label>
+                <Checkbox
+                  checked={showPlaycount}
+                  onCheckedChange={(checked) => setShowPlaycount(!!checked)}
+                />
+              </div>
+
+              {/* Auto Scroll Marquee Toggle */}
+              {layout === "carousel" && (
+                <div className="flex items-center justify-between border-t border-border/60 pt-4">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Auto Scroll Marquee
+                  </Label>
+                  <Checkbox
+                    checked={autoScroll}
+                    onCheckedChange={(checked) => setAutoScroll(!!checked)}
+                  />
+                </div>
+              )}
 
               {/* Show Username Toggle */}
               <div className="flex items-center justify-between border-t border-border/60 pt-4 pb-4">
@@ -709,6 +897,18 @@ export default function Customizer() {
                       <SelectItem value="synthwave" className="text-xs">
                         Synthwave Retro
                       </SelectItem>
+                      <SelectItem value="dracula" className="text-xs">
+                        Dracula Theme
+                      </SelectItem>
+                      <SelectItem value="nord" className="text-xs">
+                        Nord Theme
+                      </SelectItem>
+                      <SelectItem value="catppuccin" className="text-xs">
+                        Catppuccin Macchiato
+                      </SelectItem>
+                      <SelectItem value="tokyo-night" className="text-xs">
+                        Tokyo Night
+                      </SelectItem>
                       <SelectItem value="custom" className="text-xs">
                         Custom Colors
                       </SelectItem>
@@ -784,8 +984,9 @@ export default function Customizer() {
                       <CollapsibleContent className="pt-2">
                         <ColorPicker
                           value={
-                            customBg.startsWith("linear-gradient")
-                              ? "#111115"
+                            customBg === "glass" ||
+                            customBg.startsWith("dynamic")
+                              ? "#09090b"
                               : customBg
                           }
                           onChange={(rgba) =>
@@ -903,17 +1104,35 @@ export default function Customizer() {
               <CardTitle className="text-sm uppercase font-bold tracking-widest text-muted-foreground">
                 Live Widget Preview
               </CardTitle>
-              <TooltipWrap content="Refresh widget preview">
-                <Button
-                  onClick={() => setPreviewKey((prev) => prev + 1)}
-                  title="Refresh preview"
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-foreground h-8 w-8"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </Button>
-              </TooltipWrap>
+              <div className="flex items-center gap-1">
+                <TooltipWrap content="Download as Image (PNG)">
+                  <Button
+                    onClick={handleDownloadImage}
+                    title="Download Image"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground h-8 w-8"
+                    disabled={downloading}
+                  >
+                    {downloading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
+                  </Button>
+                </TooltipWrap>
+                <TooltipWrap content="Refresh widget preview">
+                  <Button
+                    onClick={() => setPreviewKey((prev) => prev + 1)}
+                    title="Refresh preview"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground h-8 w-8"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </Button>
+                </TooltipWrap>
+              </div>
             </CardHeader>
 
             <CardContent
@@ -921,7 +1140,7 @@ export default function Customizer() {
               style={{ height: iframeHeight }}
             >
               {/* Background visual element */}
-              <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/5 dark:to-black/20 pointer-events-none"></div>
+              <div className="absolute inset-0 bg-linear-to-b from-transparent to-black/5 dark:to-black/20 pointer-events-none"></div>
 
               {/* Render simulated iframe for exact URL preview */}
               <iframe
@@ -951,17 +1170,40 @@ export default function Customizer() {
                 <Code className="w-4.5 h-4.5 text-red-500" /> Share & Embed Code
               </CardTitle>
               <CardDescription>
-                Copy the iframe code below to embed the widget in Notion,
-                Obsidian, Carrd, blogs, or portfolios.
+                Select the format below to embed the widget or share a link.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Button
+                  variant={shareTab === "iframe" ? "default" : "outline"}
+                  onClick={() => setShareTab("iframe")}
+                  className="text-xs h-8 px-3"
+                >
+                  Iframe HTML
+                </Button>
+                <Button
+                  variant={shareTab === "markdown" ? "default" : "outline"}
+                  onClick={() => setShareTab("markdown")}
+                  className="text-xs h-8 px-3"
+                >
+                  Markdown
+                </Button>
+                <Button
+                  variant={shareTab === "url" ? "default" : "outline"}
+                  onClick={() => setShareTab("url")}
+                  className="text-xs h-8 px-3"
+                >
+                  Direct URL
+                </Button>
+              </div>
+
               <div className="relative">
                 {/* Make textarea taller */}
                 <Textarea
                   readOnly
-                  value={iframeCode}
-                  className="pr-12 select-all h-[160px] leading-relaxed font-mono text-xs"
+                  value={getShareCode()}
+                  className={`pr-12 select-all leading-relaxed font-mono text-xs ${shareTab === "url" ? "h-20" : "h-[160px]"}`}
                 />
                 <TooltipWrap content="Copy embed code">
                   <Button
@@ -987,7 +1229,7 @@ export default function Customizer() {
                   href={widgetUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-red-600/10"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-primary hover:bg-red-600 active:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-red-600/10"
                 >
                   Open Standalone Widget{" "}
                   <ExternalLink className="w-3.5 h-3.5" />

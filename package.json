@@ -16,6 +16,7 @@
     "clsx": "^2.1.1",
     "color": "^5.0.3",
     "colorthief": "^3.3.1",
+    "html-to-image": "^1.11.13",
     "js-cookie": "^3.0.8",
     "lucide-react": "^1.18.0",
     "radix-ui": "^1.5.0",

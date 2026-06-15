@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { getColor, getPalette } from "colorthief";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -30,23 +30,26 @@ export default function WidgetEmbed() {
   const username = searchParams.get("username") || "";
   const type = searchParams.get("type") || "nowplaying"; // nowplaying | toptracks | topartists | topalbums
   const period = (searchParams.get("period") || "7day") as Period;
-  const theme = searchParams.get("theme") || "dark"; // glass | dark | light | custom
-  const customBg = searchParams.get("bg") || "";
+  const bgParam = searchParams.get("bg") || "#09090b";
   const bgImage = searchParams.get("bgImage") || "";
-  const customTextColor = searchParams.get("textColor") || "";
+  const customTextColor = searchParams.get("textColor") || "#a1a1aa";
   const customAccentColor = searchParams.get("accentColor") || "";
   const customRadius = searchParams.get("radius") || "lg"; // none | sm | md | lg | xl | full
   const layout = searchParams.get("layout") || "list"; // list | grid | compact
-  const limit = parseInt(searchParams.get("limit") || "5", 10);
+  const rawLimit = parseInt(searchParams.get("limit") || "5", 10);
+  const limit = Math.min(Math.max(rawLimit, 1), 30);
   const animated = searchParams.get("animated") !== "false";
   const customFont = searchParams.get("font") || "Be Vietnam Pro";
   const clickable = searchParams.get("clickable") !== "false";
   const showCover = searchParams.get("showCover") !== "false";
   const colsParam = searchParams.get("cols");
   const showLoved = searchParams.get("showLoved") !== "false";
+  const showPlaycount = searchParams.get("showPlaycount") !== "false";
+  const autoScroll = searchParams.get("autoScroll") === "true";
   const showUsername = searchParams.get("showUsername") === "true";
   const scrobbleLabel = searchParams.get("scrobbleLabel") || "scrobbles";
   const clickTarget = searchParams.get("clickTarget") || "lastfm";
+  const heightMode = searchParams.get("heightMode") || "auto";
 
   const getRedirectUrl = (track: Track) => {
     if (clickTarget === "spotify") {
@@ -136,6 +139,8 @@ export default function WidgetEmbed() {
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStat[]>([]);
   const [topTags, setTopTags] = useState<Tag[]>([]);
   const [isVisible, setIsVisible] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
+  const carouselRef = useRef<HTMLDivElement>(null);
   const [playingPreview, setPlayingPreview] = useState<string | null>(null);
   const [audioObj] = useState(() => new Audio());
   const [dynamicColor, setDynamicColor] = useState<{
@@ -149,17 +154,24 @@ export default function WidgetEmbed() {
   const [showBars, setShowBars] = useState(false);
 
   useEffect(() => {
-    // Reset #root minHeight so the iframe can shrink-wrap the content tightly
+    // Control #root height based on heightMode
     const root = document.getElementById("root");
     if (root) {
-      root.style.minHeight = "auto";
-      root.style.height = "fit-content";
+      if (heightMode === "fixed") {
+        root.style.minHeight = "auto";
+        root.style.height = "100dvh";
+        document.body.style.overflow = "hidden";
+      } else {
+        root.style.minHeight = "auto";
+        root.style.height = "fit-content";
+        document.body.style.overflow = "visible";
+      }
     }
-  }, []);
+  }, [heightMode]);
 
   useEffect(() => {
     if (
-      theme?.startsWith("dynamic") &&
+      bgParam?.startsWith("dynamic") &&
       type === "nowplaying" &&
       nowPlaying?.image
     ) {
@@ -199,7 +211,7 @@ export default function WidgetEmbed() {
     } else {
       setDynamicColor(null);
     }
-  }, [theme, type, nowPlaying?.image]);
+  }, [bgParam, type, nowPlaying?.image]);
 
   const togglePreview = (url: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -352,6 +364,35 @@ export default function WidgetEmbed() {
     };
   }, [username, type, period, limit, isVisible, nowPlaying?.nowPlaying]);
 
+  useEffect(() => {
+    if (layout !== "carousel" || !autoScroll || loading || !carouselRef.current)
+      return;
+
+    let animationId: number;
+    let currentScroll = carouselRef.current.scrollLeft;
+    // Base speed = 0.5 pixels per frame, slow down to 0.1 on hover
+    const speed = isHovered ? 0.1 : 0.5;
+
+    const scroll = () => {
+      if (carouselRef.current) {
+        currentScroll += speed;
+
+        // Use scrollWidth / 2 because we duplicated the items
+        const halfWidth = carouselRef.current.scrollWidth / 2;
+
+        if (currentScroll >= halfWidth) {
+          currentScroll -= halfWidth; // seamless reset
+        }
+
+        carouselRef.current.scrollLeft = currentScroll;
+      }
+      animationId = requestAnimationFrame(scroll);
+    };
+
+    animationId = requestAnimationFrame(scroll);
+    return () => cancelAnimationFrame(animationId);
+  }, [layout, autoScroll, loading, isHovered]);
+
   // Determine container styling based on theme
   let containerStyle: CSSProperties = {};
   let containerClasses = "";
@@ -369,16 +410,10 @@ export default function WidgetEmbed() {
   };
   const roundedClass = radiusMap[customRadius] || "rounded-lg";
 
-  if (theme === "glass") {
+  if (bgParam === "glass") {
     containerClasses = `backdrop-blur-md bg-white/10 border border-white/20 text-white shadow-xl ${roundedClass} transition-all duration-300 ease-in-out`;
     textClass = "text-white/80 transition-colors duration-300";
-  } else if (theme === "dark") {
-    containerClasses = `bg-zinc-950 border border-zinc-900 text-zinc-100 shadow-2xl ${roundedClass} transition-all duration-300 ease-in-out`;
-    textClass = "text-zinc-400 transition-colors duration-300";
-  } else if (theme === "light") {
-    containerClasses = `bg-white border border-zinc-200 text-zinc-900 shadow-lg ${roundedClass} transition-all duration-300 ease-in-out`;
-    textClass = "text-zinc-500 transition-colors duration-300";
-  } else if (theme?.startsWith("dynamic") && type === "nowplaying") {
+  } else if (bgParam?.startsWith("dynamic") && type === "nowplaying") {
     containerClasses = `shadow-2xl ${roundedClass} transition-all duration-700 ease-in-out border`;
     if (dynamicColor) {
       const { r, g, b, hex } = dynamicColor;
@@ -386,8 +421,8 @@ export default function WidgetEmbed() {
       // Determine if we should use dark or light layout based on explicit theme,
       // fallback to auto-detect if the theme is just "dynamic"
       const forceDark =
-        theme === "dynamic-dark" ||
-        (theme === "dynamic" && dynamicColor.isDark);
+        bgParam === "dynamic-dark" ||
+        (bgParam === "dynamic" && dynamicColor.isDark);
 
       if (forceDark) {
         // Guarantee the background is dark by heavily darkening the extracted hue (e.g., 25% brightness)
@@ -447,10 +482,10 @@ export default function WidgetEmbed() {
     // Custom theme: utilizes parameters bg and textColor
     containerClasses = `shadow-md ${roundedClass} transition-all duration-300 ease-in-out`;
     containerStyle = {
-      background:
-        customBg || "linear-gradient(135deg, #1e1e24 0%, #111115 100%)",
-      color: customTextColor || "#ffffff",
+      background: bgParam,
+      color: customTextColor,
     };
+    textClass = "opacity-80 transition-colors duration-300";
   }
 
   if (bgImage) {
@@ -460,6 +495,62 @@ export default function WidgetEmbed() {
   }
 
   containerStyle.fontFamily = `"${customFont}", sans-serif`;
+
+  // Custom scrollbar generation based on background
+  const getScrollbarCSS = () => {
+    let isDarkBg = true;
+    if (bgParam && bgParam.startsWith("#")) {
+      const hex = bgParam.replace("#", "");
+      if (hex.length === 3 || hex.length === 6) {
+        const r = parseInt(
+          hex.length === 3 ? hex[0] + hex[0] : hex.slice(0, 2),
+          16,
+        );
+        const g = parseInt(
+          hex.length === 3 ? hex[1] + hex[1] : hex.slice(2, 4),
+          16,
+        );
+        const b = parseInt(
+          hex.length === 3 ? hex[2] + hex[2] : hex.slice(4, 6),
+          16,
+        );
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        isDarkBg = brightness < 128;
+      }
+    } else if (bgParam === "light" || bgParam === "dynamic-light") {
+      isDarkBg = false;
+    } else if (bgParam === "glass") {
+      isDarkBg = true;
+    }
+
+    const thumbColor = isDarkBg
+      ? "rgba(255, 255, 255, 0.2)"
+      : "rgba(0, 0, 0, 0.2)";
+    const thumbHoverColor = isDarkBg
+      ? "rgba(255, 255, 255, 0.35)"
+      : "rgba(0, 0, 0, 0.35)";
+
+    return `
+      .custom-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: ${thumbColor} transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: ${thumbColor} !important;
+        border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background-color: ${thumbHoverColor} !important;
+      }
+    `;
+  };
 
   const formatRelativeTime = (uts?: number, fallback?: string) => {
     if (!uts) return fallback || "";
@@ -476,7 +567,7 @@ export default function WidgetEmbed() {
   const isPlaying = nowPlaying?.nowPlaying || false;
 
   const renderSkeletons = () => {
-    const isGrid = layout === "grid";
+    const isGrid = layout === "grid" || layout === "carousel";
     const skeletonClass = "bg-current/10 animate-pulse rounded";
 
     if (type === "userprofile") {
@@ -523,35 +614,37 @@ export default function WidgetEmbed() {
     if (type === "weeklystats") {
       return (
         <div
-          className={`w-full flex flex-col gap-3 p-6 ${containerClasses}`}
+          className={`w-full flex flex-col p-6 overflow-hidden ${containerClasses}`}
           style={containerStyle}
         >
-          <h3 className="font-extrabold text-lg mb-2 flex items-center gap-2">
+          <h3 className="font-extrabold text-lg flex items-center gap-2 shrink-0 pb-3 mb-3 border-b border-current/10">
             <Music className="w-5 h-5" style={{ color: accentColor }} /> Weekly
             Top
           </h3>
-          {Array(limit)
-            .fill(0)
-            .map((_, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-md bg-current/10 animate-pulse flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-end mb-2">
-                    <div className="w-3/4">
-                      <div className="w-full h-4 bg-current/10 animate-pulse rounded mb-1" />
-                      <div className="w-1/2 h-3 bg-current/10 animate-pulse rounded" />
+          <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
+            {Array(limit)
+              .fill(0)
+              .map((_, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-md bg-current/10 animate-pulse shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-end mb-2">
+                      <div className="w-3/4">
+                        <div className="w-full h-4 bg-current/10 animate-pulse rounded mb-1" />
+                        <div className="w-1/2 h-3 bg-current/10 animate-pulse rounded" />
+                      </div>
+                      <div className="w-6 h-4 bg-current/10 animate-pulse rounded" />
                     </div>
-                    <div className="w-6 h-4 bg-current/10 animate-pulse rounded" />
-                  </div>
-                  <div className="w-full h-1.5 bg-current/5 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-current/10 animate-pulse"
-                      style={{ width: "0%" }}
-                    />
+                    <div className="w-full h-1.5 bg-current/5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-current/10 animate-pulse"
+                        style={{ width: "0%" }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+          </div>
         </div>
       );
     }
@@ -567,7 +660,7 @@ export default function WidgetEmbed() {
               <div className="flex items-center min-w-0 flex-1">
                 {showCover && (
                   <div
-                    className={`relative flex-shrink-0 w-16 h-16 rounded-xl shadow-lg border border-white/5 bg-current/10 animate-pulse`}
+                    className={`relative shrink-0 w-16 h-16 rounded-xl shadow-lg border border-white/5 bg-current/10 animate-pulse`}
                   />
                 )}
                 <div className="ml-4 min-w-0 flex-1 flex flex-col justify-center">
@@ -593,7 +686,7 @@ export default function WidgetEmbed() {
                 />
               </div>
 
-              <div className="flex items-center gap-12">
+              <div className="flex items-center gap-4 sm:gap-8">
                 <div className="text-current opacity-30 scale-[2] transform origin-center">
                   <svg
                     width="18"
@@ -660,7 +753,7 @@ export default function WidgetEmbed() {
             style={containerStyle}
           >
             {showCover && (
-              <div className="relative flex-shrink-0 w-12 h-12 bg-current/10 animate-pulse rounded-md" />
+              <div className="relative shrink-0 w-12 h-12 bg-current/10 animate-pulse rounded-md" />
             )}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 mb-1.5">
@@ -680,7 +773,7 @@ export default function WidgetEmbed() {
           style={containerStyle}
         >
           {showCover && (
-            <div className="relative flex-shrink-0">
+            <div className="relative shrink-0">
               <div className="relative w-32 h-32 rounded-full border-2 border-white/10 bg-current/5 flex items-center justify-center shadow-xl">
                 <div className="absolute inset-1 rounded-full border border-white/5 bg-current/5"></div>
                 <div className="absolute inset-6 rounded-full border border-dashed border-current/10 animate-[spin_10s_linear_infinite]"></div>
@@ -704,11 +797,19 @@ export default function WidgetEmbed() {
       return Array(limit)
         .fill(0)
         .map((_, idx) => {
-          if (isGrid) {
+          if (isGrid || layout === "immersive-grid") {
+            if (layout === "immersive-grid") {
+              return (
+                <div
+                  key={idx}
+                  className="aspect-square bg-current/10 animate-pulse w-full border border-current/5"
+                />
+              );
+            }
             return (
               <div
                 key={idx}
-                className="flex flex-col items-center text-center p-2 rounded"
+                className={`flex flex-col items-center text-center p-2 rounded ${layout === "carousel" ? "min-w-[130px] snap-center shrink-0" : ""}`}
               >
                 {showCover && (
                   <div
@@ -729,7 +830,7 @@ export default function WidgetEmbed() {
               </span>
               {showCover && (
                 <div
-                  className={`w-10 h-10 flex-shrink-0 bg-current/10 animate-pulse ${type === "topartists" ? "rounded-full border border-white/5" : "rounded"}`}
+                  className={`w-10 h-10 shrink-0 bg-current/10 animate-pulse ${type === "topartists" ? "rounded-full border border-white/5" : "rounded"}`}
                 />
               )}
               <div
@@ -761,10 +862,10 @@ export default function WidgetEmbed() {
 
     return (
       <div
-        className={`p-5 w-full h-full flex flex-col ${containerClasses}`}
+        className={`p-3 sm:p-5 w-full h-full flex flex-col overflow-hidden ${containerClasses}`}
         style={containerStyle}
       >
-        <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3">
+        <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3 shrink-0">
           <h3 className="font-extrabold text-xs sm:text-sm tracking-wider flex items-center gap-2 truncate">
             <Play
               className="w-4 h-4 fill-current text-red-500"
@@ -779,13 +880,19 @@ export default function WidgetEmbed() {
           </span>
         </div>
         {layout === "list" ? (
-          <div className="flex flex-col w-full h-full p-4 overflow-y-auto custom-scrollbar gap-2">
+          <div className="flex flex-col w-full flex-1 min-h-0 p-2 sm:p-4 overflow-y-auto custom-scrollbar gap-2">
+            {renderSkeletonItems()}
+          </div>
+        ) : layout === "carousel" ? (
+          <div className="flex w-full flex-1 min-h-0 p-2 sm:p-4 overflow-x-auto custom-scrollbar gap-3 snap-x snap-mandatory items-stretch pb-6">
             {renderSkeletonItems()}
           </div>
         ) : (
           <div
-            className="grid gap-3 p-4 overflow-y-auto custom-scrollbar w-full"
-            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+            className={`grid ${layout === "immersive-grid" ? "gap-0 p-0 content-start auto-rows-max" : "gap-3 p-2 sm:p-4 content-start auto-rows-max"} flex-1 min-h-0 overflow-y-auto custom-scrollbar w-full`}
+            style={{
+              gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, max(85px, calc(100% / ${cols} - ${layout === "immersive-grid" ? "0px" : "12px"}))), 1fr))`,
+            }}
           >
             {renderSkeletonItems()}
           </div>
@@ -846,7 +953,7 @@ export default function WidgetEmbed() {
                   rel={
                     clickable && username ? "noopener noreferrer" : undefined
                   }
-                  className={`relative flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden shadow-lg border border-white/5 ${clickable && username ? "cursor-pointer hover:opacity-90" : ""}`}
+                  className={`relative shrink-0 w-16 h-16 rounded-xl overflow-hidden shadow-lg border border-white/5 ${clickable && username ? "cursor-pointer hover:opacity-90" : ""}`}
                 >
                   <img
                     src={albumCover}
@@ -876,7 +983,7 @@ export default function WidgetEmbed() {
 
             {/* Equalizer animation */}
             {isPlaying && !isPaused && animated ? (
-              <div className="flex items-end gap-[3px] h-[18px] px-1 flex-shrink-0 ml-3 mb-1">
+              <div className="flex items-end gap-[3px] h-[18px] px-1 shrink-0 ml-3 mb-1">
                 <span
                   className="w-[3px] h-3 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite_alternate]"
                   style={{ backgroundColor: accentColor }}
@@ -891,7 +998,7 @@ export default function WidgetEmbed() {
                 ></span>
               </div>
             ) : (
-              <div className="flex items-end gap-[3px] h-[18px] px-1 flex-shrink-0 ml-3 mb-1 opacity-40">
+              <div className="flex items-end gap-[3px] h-[18px] px-1 shrink-0 ml-3 mb-1 opacity-40">
                 <span
                   className="w-[3px] h-2.5 rounded-full"
                   style={{ backgroundColor: accentColor }}
@@ -911,7 +1018,7 @@ export default function WidgetEmbed() {
           {/* Middle row: Progress slider & Duration text labels */}
           <div className="w-full mt-4">
             <div className="w-full h-[3.5px] rounded-full relative overflow-hidden bg-current opacity-15"></div>
-            <div className="-mt-[3.5px] w-full h-[3.5px] rounded-full relative overflow-hidden bg-transparent">
+            <div className="mt-[-3.5px] w-full h-[3.5px] rounded-full relative overflow-hidden bg-transparent">
               <div
                 className="h-full rounded-full transition-all duration-300"
                 style={{
@@ -957,7 +1064,7 @@ export default function WidgetEmbed() {
             </div>
 
             {/* Media controls group */}
-            <div className="flex items-center gap-12">
+            <div className="flex items-center gap-6 sm:gap-8">
               {/* Prev Button */}
               <div className="text-current opacity-30 scale-[2] transform origin-center">
                 <svg
@@ -1049,7 +1156,7 @@ export default function WidgetEmbed() {
           style={containerStyle}
         >
           {showCover && (
-            <div className="relative flex-shrink-0 w-12 h-12">
+            <div className="relative shrink-0 w-12 h-12">
               <img
                 src={albumCover}
                 alt={nowPlaying?.album || "Album cover"}
@@ -1088,7 +1195,7 @@ export default function WidgetEmbed() {
         style={containerStyle}
       >
         {/* Vinyl / Cover disc effect */}
-        <div className="relative flex-shrink-0 group">
+        <div className="relative shrink-0 group">
           {isPlaying && animated && (
             <div className="absolute inset-0 w-32 h-32 rounded-full border-4 border-dashed border-red-500/30 animate-[spin_30s_linear_infinite] pointer-events-none scale-110"></div>
           )}
@@ -1256,62 +1363,64 @@ export default function WidgetEmbed() {
     const maxPlaycount = Math.max(...weeklyStats.map((s) => s.playcount), 1);
     return (
       <div
-        className={`w-full flex flex-col gap-3 p-6 overflow-y-auto custom-scrollbar ${containerClasses}`}
+        className={`w-full flex flex-col p-6 overflow-hidden ${containerClasses}`}
         style={containerStyle}
       >
-        <h3 className="font-extrabold text-lg mb-2 flex items-center gap-2">
+        <h3 className="font-extrabold text-lg flex items-center gap-2 shrink-0 pb-3 mb-3 border-b border-white/10">
           <Music className="w-5 h-5" style={{ color: accentColor }} /> Weekly
           Top
         </h3>
-        {weeklyStats.map((stat, idx) => (
-          <div
-            key={idx}
-            className="flex items-center gap-4 animate-in fade-in zoom-in-95 duration-500"
-            style={{ animationDelay: `${idx * 100}ms` }}
-          >
-            <div className="w-10 h-10 rounded-sm overflow-hidden flex-shrink-0 shadow">
-              <img
-                src={stat.image}
-                alt={stat.artist}
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-end mb-1">
-                <div className="truncate pr-4">
-                  <p className="font-bold text-sm truncate">{stat.name}</p>
-                  <p className={`text-xs opacity-80 truncate ${textClass}`}>
-                    {stat.artist}
-                  </p>
+        <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
+          {weeklyStats.map((stat, idx) => (
+            <div
+              key={idx}
+              className="flex items-center gap-4 animate-in fade-in zoom-in-95 duration-500"
+              style={{ animationDelay: `${idx * 100}ms` }}
+            >
+              <div className="w-10 h-10 rounded-sm overflow-hidden shrink-0 shadow">
+                <img
+                  src={stat.image}
+                  alt={stat.artist}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-end mb-1">
+                  <div className="truncate pr-4">
+                    <p className="font-bold text-sm truncate">{stat.name}</p>
+                    <p className={`text-xs opacity-80 truncate ${textClass}`}>
+                      {stat.artist}
+                    </p>
+                  </div>
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: accentColor }}
+                  >
+                    {stat.playcount}
+                  </span>
                 </div>
-                <span
-                  className="text-xs font-medium"
-                  style={{ color: accentColor }}
-                >
-                  {stat.playcount}
-                </span>
-              </div>
-              <div className="w-full h-1.5 bg-current/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000 ease-out"
-                  style={{
-                    width: showBars
-                      ? `${(stat.playcount / maxPlaycount) * 100}%`
-                      : "0%",
-                    backgroundColor: accentColor,
-                  }}
-                ></div>
+                <div className="w-full h-1.5 bg-current/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-1000 ease-out"
+                    style={{
+                      width: showBars
+                        ? `${(stat.playcount / maxPlaycount) * 100}%`
+                        : "0%",
+                      backgroundColor: accentColor,
+                    }}
+                  ></div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     );
   }
 
   // Views for Top Stats (Tracks, Artists, Albums, etc)
   const renderItems = () => {
-    const isGrid = layout === "grid";
+    const isGrid = layout === "grid" || layout === "carousel";
 
     if (
       type === "toptracks" ||
@@ -1321,6 +1430,58 @@ export default function WidgetEmbed() {
       return tracks.map((track, idx) => {
         const itemUrl = getRedirectUrl(track);
         const RowTag = clickable && username ? "a" : "div";
+        if (layout === "immersive-grid") {
+          return (
+            <RowTag
+              key={idx}
+              href={clickable && username ? itemUrl : undefined}
+              target={clickable && username ? "_blank" : undefined}
+              rel={clickable && username ? "noopener noreferrer" : undefined}
+              className={`group relative aspect-square w-full overflow-hidden block ${clickable && username ? "cursor-pointer" : ""}`}
+            >
+              {track.image ? (
+                <img
+                  src={track.image}
+                  alt={track.name}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+              ) : (
+                <div className="w-full h-full bg-white/10 flex items-center justify-center">
+                  <Music className="w-8 h-8 opacity-60" />
+                </div>
+              )}
+              {/* Overlay */}
+              <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-2 sm:p-3 z-10">
+                <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-2 leading-tight">
+                  {track.name}
+                </h4>
+                <p className="text-[10px] sm:text-xs mt-0.5 text-white/80 truncate">
+                  {track.artist}
+                </p>
+                <div className="flex items-center justify-between mt-1.5">
+                  {showPlaycount && (
+                    <span
+                      className="text-[10px] font-bold"
+                      style={{ color: accentColor }}
+                    >
+                      {type === "recenttracks"
+                        ? formatRelativeTime(track.uts, track.date)
+                        : type === "lovedtracks"
+                          ? "Loved"
+                          : getScrobbleText(track.plays || 0)}
+                    </span>
+                  )}
+                  {showLoved && track.loved && (
+                    <Heart
+                      className="w-3.5 h-3.5 fill-current text-red-500"
+                      style={{ color: accentColor }}
+                    />
+                  )}
+                </div>
+              </div>
+            </RowTag>
+          );
+        }
         if (isGrid) {
           return (
             <RowTag
@@ -1328,10 +1489,10 @@ export default function WidgetEmbed() {
               href={clickable && username ? itemUrl : undefined}
               target={clickable && username ? "_blank" : undefined}
               rel={clickable && username ? "noopener noreferrer" : undefined}
-              className={`group flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""}`}
+              className={`group flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""} ${layout === "carousel" ? "min-w-[130px] snap-center shrink-0" : ""}`}
             >
               {showCover && (
-                <div className="w-20 h-20 bg-white/10 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center shadow-md relative">
+                <div className="w-20 h-20 bg-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center shadow-md relative">
                   {track.image ? (
                     <img
                       src={track.image}
@@ -1396,21 +1557,28 @@ export default function WidgetEmbed() {
               >
                 {track.artist}
               </p>
-              <span
-                className="text-[10px] font-semibold mt-2.5 opacity-90 flex items-center justify-center"
-                style={{ color: accentColor }}
-              >
-                {type === "recenttracks" ? (
-                  <span title={track.date} className="cursor-help">{formatRelativeTime(track.uts, track.date)}</span>
-                ) : type === "lovedtracks" ? (
-                  <span className="flex items-center gap-1 cursor-help" title={track.date}>
-                    <Heart className="w-3 h-3 fill-current text-red-500" />{" "}
-                    {formatRelativeTime(track.uts, track.date) || "Loved"}
-                  </span>
-                ) : (
-                  getScrobbleText(track.plays || 0)
-                )}
-              </span>
+              {showPlaycount && (
+                <span
+                  className="text-[10px] font-semibold mt-2.5 opacity-90 flex items-center justify-center"
+                  style={{ color: accentColor }}
+                >
+                  {type === "recenttracks" ? (
+                    <span title={track.date} className="cursor-help">
+                      {formatRelativeTime(track.uts, track.date)}
+                    </span>
+                  ) : type === "lovedtracks" ? (
+                    <span
+                      className="flex items-center gap-1 cursor-help"
+                      title={track.date}
+                    >
+                      <Heart className="w-3 h-3 fill-current text-red-500" />{" "}
+                      {formatRelativeTime(track.uts, track.date) || "Loved"}
+                    </span>
+                  ) : (
+                    getScrobbleText(track.plays || 0)
+                  )}
+                </span>
+              )}
             </RowTag>
           );
         }
@@ -1427,7 +1595,7 @@ export default function WidgetEmbed() {
               {idx + 1}
             </span>
             {showCover && (
-              <div className="w-10 h-10 bg-white/10 rounded flex-shrink-0 overflow-hidden flex items-center justify-center relative">
+              <div className="w-10 h-10 bg-white/10 rounded shrink-0 overflow-hidden flex items-center justify-center relative">
                 {track.image ? (
                   <img
                     src={track.image}
@@ -1490,17 +1658,24 @@ export default function WidgetEmbed() {
                   />
                 </span>
               )}
-              <span className="text-[10px] font-semibold opacity-75 flex items-center">
-                {type === "recenttracks" ? (
-                  <span title={track.date} className="cursor-help">{formatRelativeTime(track.uts, track.date)}</span>
-                ) : type === "lovedtracks" ? (
-                  <span className="flex items-center gap-1 cursor-help" title={track.date}>
-                    {formatRelativeTime(track.uts, track.date) || "Loved"}
-                  </span>
-                ) : (
-                  getScrobbleText(track.plays || 0)
-                )}
-              </span>
+              {showPlaycount && (
+                <span className="text-[10px] font-semibold opacity-75 flex items-center">
+                  {type === "recenttracks" ? (
+                    <span title={track.date} className="cursor-help">
+                      {formatRelativeTime(track.uts, track.date)}
+                    </span>
+                  ) : type === "lovedtracks" ? (
+                    <span
+                      className="flex items-center gap-1 cursor-help"
+                      title={track.date}
+                    >
+                      {formatRelativeTime(track.uts, track.date) || "Loved"}
+                    </span>
+                  ) : (
+                    getScrobbleText(track.plays || 0)
+                  )}
+                </span>
+              )}
             </div>
           </RowTag>
         );
@@ -1511,6 +1686,44 @@ export default function WidgetEmbed() {
       return artists.map((artist, idx) => {
         const itemUrl = getArtistRedirectUrl(artist.name);
         const RowTag = clickable && username ? "a" : "div";
+        if (layout === "immersive-grid") {
+          return (
+            <RowTag
+              key={idx}
+              href={clickable && username ? itemUrl : undefined}
+              target={clickable && username ? "_blank" : undefined}
+              rel={clickable && username ? "noopener noreferrer" : undefined}
+              className={`group relative aspect-square w-full overflow-hidden block ${clickable && username ? "cursor-pointer" : ""}`}
+            >
+              {artist.image ? (
+                <img
+                  src={artist.image}
+                  alt={artist.name}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+              ) : (
+                <div className="w-full h-full bg-white/10 flex items-center justify-center">
+                  <User className="w-8 h-8 opacity-60" />
+                </div>
+              )}
+              <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-2 sm:p-3 z-10">
+                <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-2 leading-tight">
+                  {artist.name}
+                </h4>
+                <div className="flex items-center justify-between mt-1.5">
+                  {showPlaycount && (
+                    <span
+                      className="text-[10px] font-bold"
+                      style={{ color: accentColor }}
+                    >
+                      {getScrobbleText(artist.playcount)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </RowTag>
+          );
+        }
         if (isGrid) {
           return (
             <RowTag
@@ -1518,10 +1731,10 @@ export default function WidgetEmbed() {
               href={clickable && username ? itemUrl : undefined}
               target={clickable && username ? "_blank" : undefined}
               rel={clickable && username ? "noopener noreferrer" : undefined}
-              className={`flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""}`}
+              className={`group flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""} ${layout === "carousel" ? "min-w-[130px] snap-center shrink-0" : ""}`}
             >
               {showCover && (
-                <div className="w-20 h-20 bg-white/10 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center border border-white/5 shadow-md">
+                <div className="w-20 h-20 bg-white/10 rounded-full shrink-0 overflow-hidden flex items-center justify-center border border-white/5 shadow-md">
                   {artist.image ? (
                     <img
                       src={artist.image}
@@ -1536,12 +1749,14 @@ export default function WidgetEmbed() {
               <h4 className="font-bold text-xs mt-2.5 w-full line-clamp-2 leading-snug">
                 {artist.name}
               </h4>
-              <span
-                className="text-[10px] font-semibold mt-2.5 opacity-90"
-                style={{ color: accentColor }}
-              >
-                {getScrobbleText(artist.playcount)}
-              </span>
+              {showPlaycount && (
+                <span
+                  className="text-[10px] font-semibold mt-2.5 opacity-90"
+                  style={{ color: accentColor }}
+                >
+                  {getScrobbleText(artist.playcount)}
+                </span>
+              )}
             </RowTag>
           );
         }
@@ -1558,7 +1773,7 @@ export default function WidgetEmbed() {
               {idx + 1}
             </span>
             {showCover && (
-              <div className="w-10 h-10 bg-white/10 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center border border-white/5">
+              <div className="w-10 h-10 bg-white/10 rounded-full shrink-0 overflow-hidden flex items-center justify-center border border-white/5">
                 {artist.image ? (
                   <img
                     src={artist.image}
@@ -1576,9 +1791,11 @@ export default function WidgetEmbed() {
               </h4>
             </div>
             <div className="text-right">
-              <span className="text-[10px] font-semibold opacity-75">
-                {getScrobbleText(artist.playcount)}
-              </span>
+              {showPlaycount && (
+                <span className="text-[10px] font-semibold opacity-75">
+                  {getScrobbleText(artist.playcount)}
+                </span>
+              )}
             </div>
           </RowTag>
         );
@@ -1589,6 +1806,45 @@ export default function WidgetEmbed() {
       return albums.map((album, idx) => {
         const itemUrl = getAlbumRedirectUrl(album.artist, album.name);
         const RowTag = clickable && username ? "a" : "div";
+        if (layout === "immersive-grid") {
+          return (
+            <RowTag
+              key={idx}
+              href={clickable && username ? itemUrl : undefined}
+              target={clickable && username ? "_blank" : undefined}
+              rel={clickable && username ? "noopener noreferrer" : undefined}
+              className={`group relative aspect-square w-full overflow-hidden block ${clickable && username ? "cursor-pointer" : ""}`}
+            >
+              {album.image ? (
+                <img
+                  src={album.image}
+                  alt={album.name}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+              ) : (
+                <div className="w-full h-full bg-white/10 flex items-center justify-center">
+                  <Disc className="w-8 h-8 opacity-60" />
+                </div>
+              )}
+              <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-2 sm:p-3 z-10">
+                <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-2 leading-tight">
+                  {album.name}
+                </h4>
+                <p className="text-[10px] sm:text-xs mt-0.5 text-white/80 truncate">
+                  {album.artist}
+                </p>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span
+                    className="text-[10px] font-bold"
+                    style={{ color: accentColor }}
+                  >
+                    {getScrobbleText(album.playcount)}
+                  </span>
+                </div>
+              </div>
+            </RowTag>
+          );
+        }
         if (isGrid) {
           return (
             <RowTag
@@ -1596,10 +1852,10 @@ export default function WidgetEmbed() {
               href={clickable && username ? itemUrl : undefined}
               target={clickable && username ? "_blank" : undefined}
               rel={clickable && username ? "noopener noreferrer" : undefined}
-              className={`flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""}`}
+              className={`group flex flex-col items-center text-center p-2 rounded hover:bg-white/5 transition-all no-underline ${clickable && username ? "cursor-pointer hover:opacity-95" : ""} ${layout === "carousel" ? "min-w-[130px] snap-center shrink-0" : ""}`}
             >
               {showCover && (
-                <div className="w-20 h-20 bg-white/10 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center shadow-md">
+                <div className="w-20 h-20 bg-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center shadow-md">
                   {album.image ? (
                     <img
                       src={album.image}
@@ -1619,12 +1875,14 @@ export default function WidgetEmbed() {
               >
                 {album.artist}
               </p>
-              <span
-                className="text-[10px] font-semibold mt-2.5 opacity-90"
-                style={{ color: accentColor }}
-              >
-                {getScrobbleText(album.playcount)}
-              </span>
+              {showPlaycount && (
+                <span
+                  className="text-[10px] font-semibold mt-2.5 opacity-90"
+                  style={{ color: accentColor }}
+                >
+                  {getScrobbleText(album.playcount)}
+                </span>
+              )}
             </RowTag>
           );
         }
@@ -1641,7 +1899,7 @@ export default function WidgetEmbed() {
               {idx + 1}
             </span>
             {showCover && (
-              <div className="w-10 h-10 bg-white/10 rounded flex-shrink-0 overflow-hidden flex items-center justify-center">
+              <div className="w-10 h-10 bg-white/10 rounded shrink-0 overflow-hidden flex items-center justify-center">
                 {album.image ? (
                   <img
                     src={album.image}
@@ -1662,9 +1920,11 @@ export default function WidgetEmbed() {
               </p>
             </div>
             <div className="text-right">
-              <span className="text-[10px] font-semibold opacity-75">
-                {getScrobbleText(album.playcount)}
-              </span>
+              {showPlaycount && (
+                <span className="text-[10px] font-semibold opacity-75">
+                  {getScrobbleText(album.playcount)}
+                </span>
+              )}
             </div>
           </RowTag>
         );
@@ -1673,6 +1933,15 @@ export default function WidgetEmbed() {
 
     return null;
   };
+
+  const itemsToRender =
+    layout === "carousel" && autoScroll
+      ? [...(renderItems() || []), ...(renderItems() || [])].map((el, i) => (
+          <div key={`dup-${i}`} className="shrink-0">
+            {el}
+          </div>
+        ))
+      : renderItems();
 
   const periodLabels: Record<string, string> = {
     "7day": "Last 7 Days",
@@ -1691,10 +1960,11 @@ export default function WidgetEmbed() {
 
   return (
     <div
-      className={`p-5 w-full h-full flex flex-col ${containerClasses}`}
+      className={`p-3 sm:p-5 w-full h-full flex flex-col overflow-hidden ${containerClasses}`}
       style={containerStyle}
     >
-      <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3">
+      <style>{getScrollbarCSS()}</style>
+      <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3 shrink-0">
         <h3 className="font-extrabold text-xs sm:text-sm tracking-wider flex items-center gap-2 truncate">
           <Play
             className="w-4 h-4 fill-current text-red-500"
@@ -1726,17 +1996,32 @@ export default function WidgetEmbed() {
         </span>
       </div>
       {layout === "list" ? (
-        <div className="flex flex-col w-full h-full p-4 overflow-y-auto custom-scrollbar gap-2">
-          {renderItems()}
+        <div className="flex flex-col w-full flex-1 min-h-0 p-2 sm:p-4 overflow-y-auto custom-scrollbar gap-2">
+          {itemsToRender}
+        </div>
+      ) : layout === "carousel" ? (
+        <div
+          ref={carouselRef}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          className={`flex w-full flex-1 min-h-0 p-2 sm:p-4 overflow-x-auto custom-scrollbar gap-3 pb-6 ${autoScroll ? "snap-none" : "snap-x snap-mandatory"}`}
+          style={{
+            WebkitMaskImage:
+              "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
+            maskImage:
+              "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
+          }}
+        >
+          {itemsToRender}
         </div>
       ) : (
         <div
-          className="grid gap-3 p-4 overflow-y-auto custom-scrollbar w-full"
+          className={`grid ${layout === "immersive-grid" ? "gap-0 p-0 content-start auto-rows-max" : "gap-3 p-2 sm:p-4 content-start auto-rows-max"} flex-1 min-h-0 overflow-y-auto custom-scrollbar w-full`}
           style={{
-            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, max(85px, calc(100% / ${cols} - ${layout === "immersive-grid" ? "0px" : "12px"}))), 1fr))`,
           }}
         >
-          {renderItems()}
+          {itemsToRender}
         </div>
       )}
     </div>
